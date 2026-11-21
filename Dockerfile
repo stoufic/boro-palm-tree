@@ -1,4 +1,4 @@
-FROM python:3.13-slim@sha256:e48f59cdba69a3cbd9ed2cf0f348d90d45a8d350d98134cf1070bc106ee9ed90 AS map
+FROM python:3.13-slim@sha256:e48f59cdba69a3cbd9ed2cf0f348d90d45a8d350d98134cf1070bc106ee9ed90 AS map-base
 RUN apt-get update && apt-get install -y --no-install-recommends git && rm -rf /var/lib/apt/lists/*
 COPY BlastRadius/blast-radius-sample/requirements.lock /tmp/requirements.lock
 RUN pip install --no-cache-dir -r /tmp/requirements.lock coverage==7.10.7
@@ -8,7 +8,9 @@ COPY BlastRadius/blast-radius-sample/map_plugin.py /app/map_plugin.py
 COPY BlastRadius/blast-radius-sample/build_map.py /app/build_map.py
 WORKDIR /opt/sqlglot
 ENV PYTHONPATH=/app:/opt/sqlglot SKIP_INTEGRATION=0
-RUN coverage run --data-file=/tmp/.coverage --branch -m pytest -q -p map_plugin; python /app/build_map.py
+
+FROM map-base AS map
+RUN coverage run --data-file=/tmp/.coverage -m pytest -q -p map_plugin; python /app/build_map.py
 
 FROM python:3.13-slim@sha256:e48f59cdba69a3cbd9ed2cf0f348d90d45a8d350d98134cf1070bc106ee9ed90
 COPY BlastRadius/blast-radius-sample/selector.py /app/selector.py
