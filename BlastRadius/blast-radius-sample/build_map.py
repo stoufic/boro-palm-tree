@@ -96,13 +96,17 @@ class FixtureVisitor(ast.NodeVisitor):
     def visit_Constant(self, node):
         if isinstance(node.value, str) and self.stack and self.stack[-1].startswith("test_"):
             value = node.value
-            if value.startswith("optimizer/") and value.endswith(".sql"):
-                fixture = "tests/fixtures/" + value
-                output["fixtures"].setdefault(fixture, set()).add(self.test_path + "::" + "::".join(self.stack))
+            test_id = self.test_path + "::" + "::".join(self.stack)
+            if re.fullmatch(r"[A-Za-z0-9_./-]+\.(?:sql|json)", value):
+                direct = ROOT / "tests/fixtures" / value
+                matches = [direct] if direct.exists() else list((ROOT / "tests/fixtures").rglob(Path(value).name))
+                for path in matches:
+                    fixture = path.relative_to(ROOT).as_posix()
+                    output["fixtures"].setdefault(fixture, set()).add(test_id)
             elif re.fullmatch(r"[A-Za-z0-9_]+", value):
                 fixture = f"tests/fixtures/optimizer/{value}.sql"
                 if (ROOT / fixture).exists():
-                    output["fixtures"].setdefault(fixture, set()).add(self.test_path + "::" + "::".join(self.stack))
+                    output["fixtures"].setdefault(fixture, set()).add(test_id)
 for test_file in ROOT.glob("tests/**/*.py"):
     try: FixtureVisitor(test_file.relative_to(ROOT).as_posix()).visit(ast.parse(test_file.read_text()))
     except (OSError, SyntaxError): pass

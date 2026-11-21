@@ -25,7 +25,7 @@ def semantic_python_files(text: str) -> set[str]:
         if line.startswith("+++ b/"): current = line[6:]
         elif current.endswith(".py") and line[:1] in "+-" and not line.startswith(("+++", "---")):
             changed = line[1:].strip()
-            if changed and not changed.startswith("#"): result.add(current)
+            if changed: result.add(current)
     return result
 
 def operator_mutation(text: str, target: str) -> bool:
@@ -56,39 +56,33 @@ def select(patch: Path, tests: list[dict], cov: dict) -> list[dict]:
     by_id, by_file = {t["id"]: t for t in tests}, {}
     for test in tests: by_file.setdefault(test["file"], []).append(test)
     ids = set()
-    current_source = ""
-    def add(index, cap=False):
+    def add(index):
         if index is None: return
         values = cov["sets"][index]
-        if cap and len(values) > 100:
-            stem = Path(current_source).stem
-            owners = {f"tests/test_{stem}.py", f"tests/dialects/test_{stem}.py"}
-            ids.update(i for i in values if by_id.get(i, {}).get("file") in owners)
-        else: ids.update(values)
+        ids.update(values)
     patch_text = patch.read_text(errors="replace")
     semantic = semantic_python_files(patch_text)
     for filename, lines in changed_lines(patch_text).items():
-        current_source = filename
         if filename.startswith("tests/"):
             add(cov.get("fixtures", {}).get(filename))
             if "/fixtures/optimizer/" in filename and filename not in cov.get("fixtures", {}):
                 name = f"test_{Path(filename).stem}"
                 ids.update(i for i in by_id if i.startswith("tests/test_optimizer.py::") and i.rsplit("::", 1)[-1] == name)
             elif "/fixtures/" in filename:
-                owner = f"tests/dialects/test_{Path(filename).stem}.py"
-                ids.update(t["id"] for t in by_file.get(owner, ()))
+                terms = {Path(filename).stem, *(part for part in Path(filename).parts if part not in {"tests", "fixtures", "optimizer"})}
+                ids.update(t["id"] for t in tests if any(term in t["id"].lower() for term in terms))
             else:
                 ids.update(t["id"] for t in by_file.get(filename, ()))
         line_map = cov.get("lines", {}).get(filename, {})
-        for line in lines: add(line_map.get(str(line)), cap=True)
+        for line in lines: add(line_map.get(str(line)))
         function_hit = False
         for start, end, context_set in cov.get("functions", {}).get(filename, ()):
-            if any(start <= line <= end for line in lines): add(context_set, cap=True); function_hit = True
+            if any(start <= line <= end for line in lines): add(context_set); function_hit = True
         if filename.startswith("sqlglot/") and filename in semantic and not function_hit:
-            add(cov.get("modules", {}).get(filename), cap=True)
+            add(cov.get("modules", {}).get(filename))
         if filename.startswith("sqlglot/"):
             if filename not in semantic: continue
-            add(cov.get("imports", {}).get(filename), cap=True)
+            add(cov.get("imports", {}).get(filename))
             match = re.match(r"sqlglot/(?:dialects|parsers|generators)/(\w+)\.py$", filename)
             if match:
                 owner = f"tests/dialects/test_{match[1]}.py"
