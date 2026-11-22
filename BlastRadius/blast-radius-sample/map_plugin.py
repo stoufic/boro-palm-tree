@@ -1,4 +1,6 @@
 """Keep test-owned worker-pool work on the test thread for exact contexts."""
+import pickle
+import weakref
 from concurrent.futures import Future, ProcessPoolExecutor, ThreadPoolExecutor
 
 from coverage import Coverage
@@ -6,6 +8,7 @@ from coverage import Coverage
 _current_nodeid = ""
 _original_thread_submit = ThreadPoolExecutor.submit
 _original_process_submit = ProcessPoolExecutor.submit
+_initialized_process_pools = weakref.WeakSet()
 
 
 def _run_in_context(function, args, kwargs):
@@ -26,7 +29,21 @@ def _submit_with_context(self, function, /, *args, **kwargs):
     # keeping every traced line under the exact pytest node id.
     future = Future()
     try:
-        future.set_result(_run_in_context(function, args, kwargs))
+        if isinstance(self, ProcessPoolExecutor):
+            # Preserve the observable parts of ProcessPoolExecutor: its
+            # initializer and the pickle round trips for calls and results.
+            # sqlglot deliberately hooks expression pickling through serde,
+            # so omitting this would make those dependencies disappear.
+            if self not in _initialized_process_pools:
+                if self._initializer:
+                    self._initializer(*self._initargs)
+                _initialized_process_pools.add(self)
+            function, args, kwargs = pickle.loads(pickle.dumps((function, args, kwargs)))
+            result = _run_in_context(function, args, kwargs)
+            result = pickle.loads(pickle.dumps(result))
+        else:
+            result = _run_in_context(function, args, kwargs)
+        future.set_result(result)
     except BaseException as error:
         future.set_exception(error)
     return future
